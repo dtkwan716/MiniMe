@@ -6,6 +6,7 @@ from ctypes import wintypes
 from pathlib import Path
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtCore import QPropertyAnimation
+from sprite_loader import load_file, load_walk
 
 
 QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
@@ -23,6 +24,7 @@ class MyWidget(QtWidgets.QWidget):
         self.starting_x = self.available_geometry.x() + self.available_geometry.width() - 75
         self.starting_y = self.available_geometry.y() + self.available_geometry.height() - 64
         self.setGeometry(self.starting_x, self.starting_y, 64, 64)
+        
 
 
         self.event_timer = QtCore.QTimer(self)
@@ -44,6 +46,58 @@ class MyWidget(QtWidgets.QWidget):
         self.going_to_sleep = False
         self.balloonFall = False
         self.falling = False
+        self.work_mode = False
+
+        self.stopwatch = QtCore.QElapsedTimer()
+        self.stopwatch_timer = QtCore.QTimer(self)
+        self.stopwatch_timer.setInterval(100)
+        self.stopwatch_timer.timeout.connect(self.update_stopwatch)
+        self.stopwatch_label = QtWidgets.QLabel("00:00:00", self)
+        self.stopwatch_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.stopwatch_label.setStyleSheet("color: dark green; font-size: 16px; background: beige; border-radius: 8px;")
+        self.stopwatch_label.hide()
+    
+    def update_stopwatch(self):
+        total_seconds = self.stopwatch.elapsed() // 1000
+        hours, remainder = divmod(total_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        self.stopwatch_label.setText(f"{hours:02}:{minutes:02}:{seconds:02}")
+
+    def working(self, event):
+        if self.work_mode:
+            self.work_mode = False
+            self.stopwatch_label.hide()
+            self.stopwatch_timer.stop()
+            self.done_work()
+
+        else:
+            self.work_mode = True
+            self.event_timer.stop()
+            self.done_animation()
+            self.in_animation = True
+            self.going_to_sleep = True
+            self.animation_timer.stop()
+            if hasattr(self, 'anim') and not self.balloonFall:
+                self.anim.stop()
+            for timer_name in ("heart_timer", "wave_timer", "eat_timer", "hit_timer", "wakeup_timer", "toSleep_timer"):
+                if hasattr(self, timer_name):
+                    getattr(self, timer_name).stop()
+            self.label.current_animation = self.label.walking_animation
+            self.label.current_frame = 0
+            self.label.loop_frame = 2
+            self.animation_timer.setInterval(200)
+            self.animation_timer.start()
+            self.anim = QPropertyAnimation(self, b"pos")
+            self.anim.setStartValue(self.pos())
+            self.anim.setEndValue(QtCore.QPoint(self.starting_x, self.pos().y()))
+            distance = self.starting_x - self.pos().x()
+            self.anim.setDuration(max(1, int(abs(distance / 0.06))))
+            self.label.face_right = distance > 0
+            self.anim.start()
+            self.stopwatch.restart()
+            self.anim.finished.connect(self.work)
+
+        
 
     def decide_event(self):
         if self.in_animation:
@@ -76,12 +130,11 @@ class MyWidget(QtWidgets.QWidget):
         self.idle_time = (current_tick - last_input_tick) & 0xFFFFFFFF
         return self.idle_time
 
-
     def check_idle(self):
         self.get_idle_time()
         if self.idle_time is None:
             return
-        elif self.dragging or self.mousePressed:
+        elif self.dragging or self.mousePressed or self.work_mode:
             return
         elif self.idle_time > 5000 and not self.is_sleeping and not self.going_to_sleep:
             self.event_timer.stop()
@@ -90,7 +143,7 @@ class MyWidget(QtWidgets.QWidget):
             self.animation_timer.stop()
             if hasattr(self, 'anim') and not self.balloonFall:
                 self.anim.stop()
-            for timer_name in ("heart_timer", "wave_timer", "eat_timer"):
+            for timer_name in ("heart_timer", "wave_timer", "eat_timer", "hit_timer", "wakeup_timer"):
                 if hasattr(self, timer_name):
                     getattr(self, timer_name).stop()
             self.label.current_animation = self.label.walking_animation
@@ -106,19 +159,21 @@ class MyWidget(QtWidgets.QWidget):
             self.anim.start()
             self.anim.finished.connect(self.toSleep)
         elif self.idle_time < 1000 and (self.is_sleeping or self.going_to_sleep):
-            if hasattr(self, "toSleepTimer"):
+            if hasattr(self, "toSleep_timer"):
                 self.toSleep_timer.stop()
-            self.is_sleeping = False
             self.going_to_sleep = False
             self.event_timer.stop()
             self.in_animation = True
             self.animation_timer.stop()
             if hasattr(self, 'anim') and not self.balloonFall:
                 self.anim.stop()
-            for timer_name in ("heart_timer", "wave_timer", "eat_timer"):
+            for timer_name in ("heart_timer", "wave_timer", "eat_timer", "hit_timer", "wakeup_timer"):
                 if hasattr(self, timer_name):
                     getattr(self, timer_name).stop()
-            self.wakeup()
+            if self.is_sleeping:
+                self.wakeup()
+            else:
+                self.done_animation()
 
     def walk(self):
         self.in_animation = True
@@ -138,10 +193,11 @@ class MyWidget(QtWidgets.QWidget):
         self.anim.start()
         self.anim.finished.connect(self.done_animation)
     
-
     def done_animation(self):
         if self.dragging:
             return
+        if hasattr(self, "pop_timer"):
+            self.pop_timer.stop()
         self.in_animation = False
         self.balloonFall = False
         self.falling = False
@@ -201,8 +257,8 @@ class MyWidget(QtWidgets.QWidget):
 
     def fall(self):
         self.in_animation = True
-        self.balloonFall = False
         self.falling = True
+        self.balloonFall = False
         self.label.current_animation = self.label.fall_animation
         self.label.current_frame = 0
         self.label.loop_frame = 0
@@ -231,7 +287,7 @@ class MyWidget(QtWidgets.QWidget):
 
     def toSleep(self):
         self.in_animation = True
-        self.label.current_animation = self.label.toSleep_animation
+        self.label.current_animation = self.label.to_sleep_animation
         self.label.current_frame = 0
         self.label.loop_frame = 0
         self.event_timer.stop()
@@ -240,7 +296,6 @@ class MyWidget(QtWidgets.QWidget):
         self.toSleep_timer.setSingleShot(True)
         self.toSleep_timer.start(1800)
         self.toSleep_timer.timeout.connect(self.sleep)
-
 
     def sleep(self):
         self.in_animation = True
@@ -254,6 +309,7 @@ class MyWidget(QtWidgets.QWidget):
 
     def wakeup(self):
         self.in_animation = True
+        self.is_sleeping = False
         self.label.current_animation = self.label.wakeup_animation
         self.label.current_frame = 0
         self.label.loop_frame = 0
@@ -263,9 +319,53 @@ class MyWidget(QtWidgets.QWidget):
         self.wakeup_timer.setSingleShot(True)
         self.wakeup_timer.timeout.connect(self.done_animation)
         self.wakeup_timer.start(1800)
-        
+
+    def work(self):
+        self.in_animation = True
+        self.going_to_sleep = False
+        self.is_sleeping = False
+        self.label.current_animation = self.label.work_animation
+        self.label.current_frame = 0
+        self.label.loop_frame = 6
+        self.event_timer.stop()
+        self.animation_timer.start()
+        self.stopwatch.start()
+        self.update_stopwatch()
+        self.stopwatch_timer.start()
+        self.stopwatch_label.show()
+
+    def celebrate(self):
+        self.in_animation = True
+        self.label.current_animation = self.label.celebrate_animation
+        self.label.current_frame = 0
+        self.label.loop_frame = 0
+        self.event_timer.stop()
+        self.animation_timer.start()
+        self.celebrate_timer = QtCore.QTimer(self)
+        self.celebrate_timer.setSingleShot(True)
+        self.celebrate_timer.timeout.connect(self.done_animation)
+        self.celebrate_timer.start(1800)
+
+    def done_work(self):    
+        self.in_animation = True
+        self.label.current_animation = self.label.done_work_animation
+        self.label.current_frame = 0
+        self.label.loop_frame = 0
+        self.event_timer.stop()
+        self.animation_timer.start()
+        self.done_work_timer = QtCore.QTimer(self)
+        self.done_work_timer.setSingleShot(True)
+        self.done_work_timer.timeout.connect(self.celebrate)
+        self.done_work_timer.start(1800)
+
     def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.RightButton and not (self.falling or self.balloonFall):
+            self.menu.popup(event.globalPosition().toPoint())
+            return
+        
         if event.button() == QtCore.Qt.LeftButton:
+            if self.work_mode:
+                return
             if hasattr(self, "toSleep_timer"):
                 self.toSleep_timer.stop()
                 self.going_to_sleep = False
@@ -278,16 +378,17 @@ class MyWidget(QtWidgets.QWidget):
             self.animation_timer.stop()
             if hasattr(self, 'anim'):
                 self.anim.stop()
-            for timer_name in ("heart_timer", "wave_timer", "eat_timer"):
+            for timer_name in ("heart_timer", "wave_timer", "eat_timer", "hit_timer", "wakeup_timer"):
                 if hasattr(self, timer_name):
                     getattr(self, timer_name).stop()
             if self.going_to_sleep or self.is_sleeping:
-                self.toSleep_timer.stop()
+                if hasattr(self, "toSleep_timer"):
+                    self.toSleep_timer.stop()
                 self.going_to_sleep = False
                 self.is_sleeping = False
 
     def mouseMoveEvent(self, event):
-        if not (event.buttons() & QtCore.Qt.LeftButton):
+        if not (event.buttons() & QtCore.Qt.LeftButton) or self.work_mode:
             return
         distance = (
             event.globalPosition().toPoint() - self.mouseStartPos
@@ -303,6 +404,8 @@ class MyWidget(QtWidgets.QWidget):
             self.move(event.globalPosition().toPoint() - self.drag_position)
 
     def mouseReleaseEvent(self, event):
+        if self.work_mode:
+            return
         if event.button() == QtCore.Qt.LeftButton:
             self.mousePressed = False
             if  self.dragging:
@@ -328,7 +431,6 @@ class MyWidget(QtWidgets.QWidget):
                 if self.balloonFall:
                     self.animation_timer.setInterval(50)
                     self.pop()
-                
                 self.anim.stop()
                 self.anim.setStartValue(self.pos())
                 self.anim.setEndValue(QtCore.QPoint(self.pos().x(), self.starting_y))
@@ -337,6 +439,8 @@ class MyWidget(QtWidgets.QWidget):
                 self.anim.start()
                 self.anim.finished.connect(self.done_animation)
             else: 
+                if hasattr(self, "hit_timer"):
+                    self.hit_timer.stop()
                 self.dragging = False
                 self.drag_position = None
                 self.in_animation = True
@@ -350,155 +454,26 @@ class MySprite(QtWidgets.QLabel):
 
         self.loop_frame = 0
 
-        walk_sprite_sheet = QtGui.QPixmap(
-            str(Path(__file__).parent / "assets" / "Walk.png")
-        )
-
-        walk_frame_size = walk_sprite_sheet.width() // 3
-        walk_frame_positions = [(column, row) for row in range(3) for column in range(3)]
-        walk_frame_positions = walk_frame_positions[:7]
-        self.walking_animation = [
-            walk_sprite_sheet.copy(column * walk_frame_size, row * walk_frame_size, walk_frame_size, walk_frame_size)
-            .scaled(64, 64, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
-            for column, row in walk_frame_positions
-        ]       
-
-        self.walk_current_frame = 0
-        self.walk_loop_frame = 1
-
-        heart_sprite_sheet = QtGui.QPixmap(
-            str(Path(__file__).parent / "assets" / "Heart.png")
-        )
-
-        heart_frame_size = heart_sprite_sheet.width() // 3
-        heart_frame_positions = [(column, row) for row in range(3) for column in range(3)]
-        heart_frame_positions = heart_frame_positions[:7]
-        self.heart_animation = [
-            heart_sprite_sheet.copy(column * heart_frame_size, row * heart_frame_size, heart_frame_size, heart_frame_size)
-            .scaled(64, 64, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
-            for column, row in heart_frame_positions
-        ]
-
-        wave_sprite_sheet = QtGui.QPixmap(
-            str(Path(__file__).parent / "assets" / "Wave.png")
-        )
-
-        wave_frame_size = wave_sprite_sheet.width() // 3
-        wave_frame_positions = [(column, row) for row in range(3) for column in range(3)]
-        wave_frame_positions = wave_frame_positions[:5]
-        self.wave_animation = [
-            wave_sprite_sheet.copy(column * wave_frame_size, row * wave_frame_size, wave_frame_size, wave_frame_size)
-            .scaled(64, 64, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
-            for column, row in wave_frame_positions
-        ]
-
-        eat_sprite_sheet = QtGui.QPixmap(
-            str(Path(__file__).parent / "assets" / "Eat.png")
-        )
-
-        eat_frame_size = eat_sprite_sheet.width() // 3
-        eat_frame_positions = [(column, row) for row in range(3) for column in range(3)]
-        self.eat_animation = [
-            eat_sprite_sheet.copy(column * eat_frame_size, row * eat_frame_size, eat_frame_size, eat_frame_size)
-            .scaled(64, 64, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
-            for column, row in eat_frame_positions
-        ]
-
-        pickup_sprite_sheet = QtGui.QPixmap(
-            str(Path(__file__).parent / "assets" / "Pickup.png")
-        )
-
-        pickup_frame_size = pickup_sprite_sheet.width() // 3
-        pickup_frame_positions = [(column, row) for row in range(3) for column in range(3)]
-        self.pickup_animation = [
-            pickup_sprite_sheet.copy(column * pickup_frame_size, row * pickup_frame_size, pickup_frame_size, pickup_frame_size)
-            .scaled(64, 64, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
-            for column, row in pickup_frame_positions
-        ]
-
-        fall_sprite_sheet = QtGui.QPixmap(
-            str(Path(__file__).parent / "assets" / "Fall.png")
-        )
-
-        fall_frame_size = fall_sprite_sheet.width() // 3
-        fall_frame_positions = [(column, row) for row in range(3) for column in range(3)]
-        fall_frame_positions = fall_frame_positions[3:7]
-        self.fall_animation = [
-            fall_sprite_sheet.copy(column * fall_frame_size, row * fall_frame_size, fall_frame_size, fall_frame_size)
-            .scaled(64, 64, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
-            for column, row in fall_frame_positions
-        ]
-
-        balloon_sprite_sheet = QtGui.QPixmap(
-            str(Path(__file__).parent / "assets" / "Balloon.png")
-        )
-
-        balloon_frame_size = balloon_sprite_sheet.width() // 3
-        balloon_frame_positions = [(column, row) for row in range(3) for column in range(3)]
-        self.balloon_animation = [
-            balloon_sprite_sheet.copy(column * balloon_frame_size, row * balloon_frame_size, balloon_frame_size, balloon_frame_size)
-            .scaled(64, 64, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
-            for column, row in balloon_frame_positions
-        ]
-
-        hit_sprite_sheet = QtGui.QPixmap(
-            str(Path(__file__).parent / "assets" / "Hit.png")
-        )
-
-        hit_frame_size = hit_sprite_sheet.width() // 3
-        hit_frame_positions = [(column, row) for row in range(3) for column in range(3)]
-        self.hit_animation = [
-            hit_sprite_sheet.copy(column * hit_frame_size, row * hit_frame_size, hit_frame_size, hit_frame_size)
-            .scaled(64, 64, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
-            for column, row in hit_frame_positions
-        ]
-
-        pop_sprite_sheet = QtGui.QPixmap(
-            str(Path(__file__).parent / "assets" / "BalloonPop.png")
-        )
-
-        pop_frame_size = pop_sprite_sheet.width() // 3
-        pop_frame_positions = [(column, row) for row in range(3) for column in range(3)]
-        self.pop_animation = [
-            pop_sprite_sheet.copy(column * pop_frame_size, row * pop_frame_size, pop_frame_size, pop_frame_size)
-            .scaled(64, 64, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
-            for column, row in pop_frame_positions
-        ]
-
-        toSleep_sprite_sheet = QtGui.QPixmap(
-            str(Path(__file__).parent / "assets" / "ToSleep.png")
-        )
-
-        toSleep_frame_size = toSleep_sprite_sheet.width() // 3
-        toSleep_frame_positions = [(column, row) for row in range(3) for column in range(3)]
-        self.toSleep_animation = [
-            toSleep_sprite_sheet.copy(column * toSleep_frame_size, row * toSleep_frame_size, toSleep_frame_size, toSleep_frame_size)
-            .scaled(64, 64, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
-            for column, row in toSleep_frame_positions
-        ]
-
-        wakeup_frame_positions = toSleep_frame_positions[::-1]
-        self.wakeup_animation = [
-            toSleep_sprite_sheet.copy(column * toSleep_frame_size, row * toSleep_frame_size, toSleep_frame_size, toSleep_frame_size)
-            .scaled(64, 64, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
-            for column, row in wakeup_frame_positions
-        ]
-
-
-        Sleep_sprite_sheet = QtGui.QPixmap(
-            str(Path(__file__).parent / "assets" / "Sleep.png")
-        )
-
-        sleep_frame_size = Sleep_sprite_sheet.width() // 3
-        sleep_frame_positions = [(column, row) for row in range(3) for column in range(3)]
-        self.sleep_animation = [
-            Sleep_sprite_sheet.copy(column * sleep_frame_size, row * sleep_frame_size, sleep_frame_size, sleep_frame_size)
-            .scaled(64, 64, QtCore.Qt.IgnoreAspectRatio, QtCore.Qt.FastTransformation)
-            for column, row in sleep_frame_positions
-        ]
+        self.walking_animation = load_file("Walk.png")
+        self.walking_animation = self.walking_animation[:7:]
+        self.heart_animation = load_file("Heart.png")
+        self.heart_animation = self.heart_animation[:7:]
+        self.wave_animation = load_file("Wave.png")
+        self.eat_animation = load_file("Eat.png")   
+        self.pickup_animation = load_file("Pickup.png")
+        self.fall_animation = load_file("Fall.png")
+        self.balloon_animation = load_file("Balloon.png")
+        self.hit_animation = load_file("Hit.png")
+        self.pop_animation = load_file("BalloonPop.png")
+        self.to_sleep_animation = load_file("ToSleep.png")
+        self.sleep_animation = load_file("Sleep.png")
+        self.wakeup_animation = self.to_sleep_animation[::-1]
+        self.work_animation = load_file("Work.png")
+        self.done_work_animation = self.work_animation[::-1]
+        self.celebrate_animation = load_file("Celebrate.png")
 
         self.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignBottom)
-        self.setPixmap(self.walking_animation[self.walk_current_frame])
+        self.setPixmap(self.walking_animation[0])
 
         self.face_right = False
 
@@ -519,11 +494,22 @@ class MySprite(QtWidgets.QLabel):
         self.setPixmap(frame)
         self.resize(self.pixmap().size())
 
+class MyMenu(QtWidgets.QMenu):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        set_work_mode = self.addAction("Work Mode")
+        set_work_mode.triggered.connect(self.parent().working)
+        self.aboutToShow.connect(
+            lambda: set_work_mode.setText("Stop Work Mode" if self.parent().work_mode else "Work Mode")
+        )
+
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     widget = MyWidget()
     label = MySprite(widget)
     widget.label = label
+    widget.menu = MyMenu(widget)
     widget.animation_timer.timeout.connect(label.next_frame)
     widget.show()
     label.resize(label.pixmap().size())    
