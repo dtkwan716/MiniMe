@@ -84,7 +84,7 @@ class MyWidget(QtWidgets.QWidget):
                     getattr(self, timer_name).stop()
             self.label.current_animation = self.label.walking_animation
             self.label.current_frame = 0
-            self.label.loop_frame = 2
+            self.label.loop_frame = 3
             self.animation_timer.setInterval(200)
             self.animation_timer.start()
             self.anim = QPropertyAnimation(self, b"pos")
@@ -136,7 +136,7 @@ class MyWidget(QtWidgets.QWidget):
             return
         elif self.dragging or self.mousePressed or self.work_mode:
             return
-        elif self.idle_time > 5000 and not self.is_sleeping and not self.going_to_sleep:
+        elif self.idle_time > 60000 and not self.is_sleeping and not self.going_to_sleep:
             self.event_timer.stop()
             self.in_animation = True
             self.going_to_sleep = True
@@ -148,7 +148,7 @@ class MyWidget(QtWidgets.QWidget):
                     getattr(self, timer_name).stop()
             self.label.current_animation = self.label.walking_animation
             self.label.current_frame = 0
-            self.label.loop_frame = 2
+            self.label.loop_frame = 3
             self.animation_timer.start()
             self.anim = QPropertyAnimation(self, b"pos")
             self.anim.setStartValue(self.pos())
@@ -454,7 +454,7 @@ class MySprite(QtWidgets.QLabel):
 
         self.loop_frame = 0
 
-        self.walking_animation = load_file("WalkTest.png")
+        self.walking_animation = load_file("Walk.png")
         self.heart_animation = load_file("Heart.png")
         self.heart_animation = self.heart_animation[:7:]
         self.wave_animation = load_file("Wave.png")
@@ -504,7 +504,13 @@ class MyMenu(QtWidgets.QMenu):
         )
 
 if __name__ == "__main__":
+    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+        "MiniMe"
+    )
     app = QtWidgets.QApplication(sys.argv)
+    app.setWindowIcon(
+        QtGui.QIcon(str(Path(__file__).parent / "assets" / "mini.ico"))
+    )
     widget = MyWidget()
     label = MySprite(widget)
     widget.label = label
