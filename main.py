@@ -6,7 +6,7 @@ from ctypes import wintypes
 from pathlib import Path
 from PySide6 import QtCore, QtWidgets, QtGui
 from PySide6.QtCore import QPropertyAnimation
-from sprite_loader import load_file, load_walk
+from sprite_loader import load_file
 
 
 QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
@@ -180,7 +180,7 @@ class MyWidget(QtWidgets.QWidget):
         self.event_timer.stop()
         self.label.current_animation = self.label.walking_animation
         self.label.current_frame = 0
-        self.label.loop_frame = 2
+        self.label.loop_frame = 3
         self.animation_timer.start()
 
         self.anim = QPropertyAnimation(self, b"pos")
@@ -454,8 +454,7 @@ class MySprite(QtWidgets.QLabel):
 
         self.loop_frame = 0
 
-        self.walking_animation = load_file("Walk.png")
-        self.walking_animation = self.walking_animation[:7:]
+        self.walking_animation = load_file("WalkTest.png")
         self.heart_animation = load_file("Heart.png")
         self.heart_animation = self.heart_animation[:7:]
         self.wave_animation = load_file("Wave.png")
